@@ -69,8 +69,35 @@ def search_listings(
 
     Before writing code, fill in the Tool 1 section of planning.md.
     """
-    # Replace this with your implementation
-    return []
+    listings = load_listings()
+
+    # Filter by price and size
+    filtered = []
+    for listing in listings:
+        if max_price is not None and listing["price"] > max_price:
+            continue
+        if size is not None and size.lower() not in listing["size"].lower():
+            continue
+        filtered.append(listing)
+
+    # Score by keyword overlap with description
+    keywords = description.lower().split()
+
+    def score(listing):
+        searchable = " ".join([
+            listing["title"],
+            listing["description"],
+            " ".join(listing["style_tags"]),
+            listing["category"],
+        ]).lower()
+        return sum(1 for kw in keywords if kw in searchable)
+
+    scored = [(score(listing), listing) for listing in filtered]
+    min_score = max(1, (len(keywords) + 1) // 2)
+    scored = [(s, l) for s, l in scored if s >= min_score]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    return [listing for _, listing in scored]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -100,8 +127,36 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     Before writing code, fill in the Tool 2 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    client = _get_groq_client()
+    item_summary = f"{new_item['title']} (${new_item['price']}, {new_item['condition']} condition)"
+
+    if not wardrobe["items"]:
+        prompt = (
+            f"I just thrifted this item: {item_summary}. "
+            f"Its style tags are: {', '.join(new_item['style_tags'])}. "
+            "I don't have any wardrobe info for this user, so start your response by noting "
+            "that you're giving general styling advice since no wardrobe was provided. "
+            "Then suggest 1-2 general outfit ideas — what kinds of bottoms, shoes, "
+            "or layers would pair well. Keep it casual and specific."
+        )
+    else:
+        wardrobe_lines = "\n".join(
+            f"- {item['name']} ({', '.join(item['style_tags'])})"
+            for item in wardrobe["items"]
+        )
+        prompt = (
+            f"I just thrifted this item: {item_summary}. "
+            f"Its style tags are: {', '.join(new_item['style_tags'])}. "
+            f"Here's my current wardrobe:\n{wardrobe_lines}\n\n"
+            "Suggest 1-2 specific outfits using the new item and named pieces from my wardrobe. "
+            "Keep it casual and specific."
+        )
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -133,5 +188,22 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     Before writing code, fill in the Tool 3 section of planning.md.
     """
-    # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Sorry, we couldn't build your fit card this time. Please try again."
+
+    client = _get_groq_client()
+    prompt = (
+        f"I thrifted this item: {new_item['title']} for ${new_item['price']} on {new_item['platform']}. "
+        f"Here's the outfit I'm putting together with it: {outfit}\n\n"
+        "Write a 2-4 sentence Instagram/TikTok caption for this outfit. "
+        "Make it sound like a real OOTD post — casual, authentic, not like a product description. "
+        "Mention the item name, price, and platform once each, naturally. "
+        "Capture the specific vibe of the outfit."
+    )
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.9,
+    )
+    return response.choices[0].message.content
