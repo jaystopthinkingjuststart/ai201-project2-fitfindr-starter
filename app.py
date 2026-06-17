@@ -20,7 +20,7 @@ from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
 
 # ── query handler ─────────────────────────────────────────────────────────────
 
-def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
+def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str, str]:
     """
     Called by Gradio when the user submits a query.
 
@@ -44,25 +44,47 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            session["fit_card"].
     """
     if not user_query or not user_query.strip():
-        return "Please enter a search query.", "", ""
+        return "Please enter a search query.", "", "", ""
 
     wardrobe = get_example_wardrobe() if wardrobe_choice == "Example wardrobe" else get_empty_wardrobe()
 
     session = run_agent(query=user_query, wardrobe=wardrobe)
 
     if session["error"]:
-        return session["error"], "", ""
+        return session["error"], "", "", ""
 
     item = session["selected_item"]
-    listing_text = (
+    listing_text = ""
+    if session["relaxed"]:
+        listing_text += session["relaxed"] + "\n\n"
+    pc = session["price_check"]
+    if pc["verdict"] == "deal":
+        price_note = f"Price: ${pc['item_price']} (deal, avg similar items go for ${pc['avg_comp_price']})"
+    elif pc["verdict"] == "high":
+        price_note = f"Price: ${pc['item_price']} (a bit high, avg similar items go for ${pc['avg_comp_price']})"
+    elif pc["verdict"] == "fair":
+        price_note = f"Price: ${pc['item_price']} (fair, avg similar items go for ${pc['avg_comp_price']})"
+    else:
+        price_note = f"Price: ${pc['item_price']}"
+
+    listing_text += (
         f"{item['title']}\n"
-        f"${item['price']} — {item['platform']}\n"
+        f"{price_note} — {item['platform']}\n"
         f"Size: {item['size']} | Condition: {item['condition']}\n"
         f"Brand: {item['brand'] or 'No brand'}\n\n"
         f"{item['description']}"
     )
 
-    return listing_text, session["outfit_suggestion"], session["fit_card"]
+    trends = session["trending_styles"]
+    if trends:
+        size_note = f"in size {session['parsed'].get('size')}" if session["parsed"].get("size") else "across all sizes"
+        trending_text = f"trending styles {size_note}:\n\n" + "\n".join(
+            f"  {t['tag']} ({t['count']} listings)" for t in trends
+        )
+    else:
+        trending_text = "no trending data available for this search."
+
+    return listing_text, session["outfit_suggestion"], session["fit_card"], trending_text
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
@@ -115,6 +137,11 @@ Describe what you're looking for — include size and price if you want to filte
                 lines=8,
                 interactive=False,
             )
+            trending_output = gr.Textbox(
+                label="🔥 Trending styles",
+                lines=8,
+                interactive=False,
+            )
 
         gr.Examples(
             examples=[[q, "Example wardrobe"] for q in EXAMPLE_QUERIES],
@@ -125,12 +152,12 @@ Describe what you're looking for — include size and price if you want to filte
         submit_btn.click(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=[listing_output, outfit_output, fitcard_output, trending_output],
         )
         query_input.submit(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=[listing_output, outfit_output, fitcard_output, trending_output],
         )
 
     return demo

@@ -72,7 +72,43 @@ if it fails, we'll give a generic error/message, not an exception
 
 ### Additional Tools (if any)
 
-<!-- Copy the block above for any tools beyond the required three -->
+These are the extra credit / stretch features. Documented here before building each one.
+
+### Tool 4: estimate_price_fairness
+
+**What it does:**
+given a found item, it looks at comparable listings already in the dataset (same category, with overlapping style tags) and tells us whether the item's price is a deal, fair, or high compared to those comps. no LLM, just math on the dataset.
+
+**Input parameters:**
+- `new_item` (dict): the listing we want to price check
+
+**What it returns:**
+a dict with the verdict ("deal", "fair", or "high"), the item's price, the comparable count, and the average comp price. so the agent can say something like "this is a deal, $18 vs the $24 average for similar y2k tops."
+
+**What happens if it fails or returns nothing:**
+if there aren't enough comparable listings (say fewer than 3), we return a verdict of "not enough data" instead of guessing. no exception.
+
+---
+
+### Tool 5: get_trending_styles
+
+**What it does:**
+surfaces what styles are currently popular. real platforms like depop or tiktok block scraping and don't have a free public api for this, so we mock it using our own dataset as the "platform." we count the most common style_tags across listings, optionally narrowed to the user's size range, and return the top ones as a stand in for what's trending.
+
+**Input parameters:**
+- `size` (str or None): if given, only count tags on listings that fit this size
+
+**What it returns:**
+a list of the top style tags with their counts, sorted most popular first.
+
+**What happens if it fails or returns nothing:**
+if nothing matches the size filter, we return an empty list, not an exception.
+
+---
+
+### Stretch behavior 1: retry logic with fallback (planning loop change)
+
+this is not a new tool, it's a change to the planning loop. right now if search_listings comes back empty we set an error and stop. with this, before giving up we retry once with the size filter removed (the most common reason a search comes back empty). if the loosened retry finds something we proceed normally but tell the user what we relaxed, like "couldn't find it in size M so here's the closest match ignoring size." we track what got relaxed in the session. only if the retry is also empty do we show the hard error.
 
 ---
 

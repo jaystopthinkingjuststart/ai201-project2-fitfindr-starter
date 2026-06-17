@@ -100,6 +100,99 @@ def search_listings(
     return [listing for _, listing in scored]
 
 
+# ── Tool 5: get_trending_styles ───────────────────────────────────────────────
+
+def get_trending_styles(size: str | None = None, top_n: int = 5) -> list[dict]:
+    """
+    Surface the most popular style tags across the dataset as a proxy for
+    what's currently trending. Optionally narrow to listings that match a size.
+
+    Note: this uses the mock dataset as a stand-in for a live platform feed
+    since real fashion platforms block scraping and have no free public API.
+    The function shape is the same as a real API integration would require.
+
+    Args:
+        size:  If provided, only count tags from listings that match this size
+               (case-insensitive). None counts across all listings.
+        top_n: How many top tags to return. Defaults to 5.
+
+    Returns:
+        A list of dicts sorted by popularity, each with:
+            tag (str): the style tag
+            count (int): how many listings carry this tag
+        Returns an empty list if nothing matches the size filter — no exception.
+    """
+    listings = load_listings()
+
+    if size is not None:
+        listings = [l for l in listings if size.lower() in l["size"].lower()]
+
+    if not listings:
+        return []
+
+    counts: dict[str, int] = {}
+    for listing in listings:
+        for tag in listing.get("style_tags", []):
+            counts[tag] = counts.get(tag, 0) + 1
+
+    sorted_tags = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return [{"tag": tag, "count": count} for tag, count in sorted_tags[:top_n]]
+
+
+# ── Tool 4: estimate_price_fairness ──────────────────────────────────────────
+
+def estimate_price_fairness(new_item: dict) -> dict:
+    """
+    Compare an item's price against similar listings in the dataset to estimate
+    whether it's a deal, fair, or high.
+
+    Args:
+        new_item: A listing dict (the item the user is considering buying).
+
+    Returns:
+        A dict with:
+            verdict (str): "deal", "fair", "high", or "not enough data"
+            item_price (float): the item's price
+            avg_comp_price (float or None): average price of comparable listings
+            comp_count (int): number of comparables found
+        Never raises an exception.
+    """
+    listings = load_listings()
+    item_tags = set(new_item.get("style_tags", []))
+
+    comps = [
+        l for l in listings
+        if l["id"] != new_item["id"]
+        and l["category"] == new_item["category"]
+        and item_tags & set(l.get("style_tags", []))
+    ]
+
+    if len(comps) < 3:
+        return {
+            "verdict": "not enough data",
+            "item_price": new_item["price"],
+            "avg_comp_price": None,
+            "comp_count": len(comps),
+        }
+
+    avg = sum(l["price"] for l in comps) / len(comps)
+    diff = (new_item["price"] - avg) / avg
+
+    if diff < -0.15:
+        verdict = "deal"
+    elif diff > 0.15:
+        verdict = "high"
+    else:
+        verdict = "fair"
+
+    return {
+        "verdict": verdict,
+        "item_price": new_item["price"],
+        "avg_comp_price": round(avg, 2),
+        "comp_count": len(comps),
+    }
+
+
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
 
 def suggest_outfit(new_item: dict, wardrobe: dict) -> str:

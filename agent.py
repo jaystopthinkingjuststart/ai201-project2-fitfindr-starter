@@ -25,7 +25,7 @@ import re
 from dotenv import load_dotenv
 from groq import Groq
 
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import search_listings, suggest_outfit, create_fit_card, estimate_price_fairness, get_trending_styles
 
 load_dotenv()
 
@@ -91,6 +91,9 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "wardrobe": wardrobe,        # user's wardrobe dict
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
+        "price_check": None,         # dict returned by estimate_price_fairness
+        "trending_styles": [],       # list returned by get_trending_styles
+        "relaxed": None,             # set if a filter was dropped to find results
         "error": None,               # set if the interaction ended early
     }
 
@@ -148,21 +151,48 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["parsed"] = _parse_query(query)
     parsed = session["parsed"]
 
-    # Step 3: search and check results
-    session["search_results"] = search_listings(
-        description=parsed.get("description", query),
-        size=parsed.get("size"),
-        max_price=parsed.get("max_price"),
-    )
+    # Step 3: search, then loosen filters before giving up.
+    # We drop price first (spending more is an easier ask than changing size),
+    # then drop size if that still finds nothing.
+    desc = parsed.get("description", query)
+    size = parsed.get("size")
+    max_price = parsed.get("max_price")
+
+    session["search_results"] = search_listings(desc, size=size, max_price=max_price)
+
+    dropped = []
+    if not session["search_results"] and max_price is not None:
+        dropped.append("price")
+        max_price = None
+        session["search_results"] = search_listings(desc, size=size, max_price=max_price)
+
+    if not session["search_results"] and size is not None:
+        dropped.append("size")
+        size = None
+        session["search_results"] = search_listings(desc, size=size, max_price=max_price)
+
     if not session["search_results"]:
         session["error"] = (
             "No listings found for that search. "
-            "Try increasing your budget or adjusting size if provided, or using different keywords."
+            "Try adjusting budget or size, or using different keywords."
         )
         return session
 
-    # Step 4: pick the top result
+    # Build a friendly note about anything we loosened
+    if dropped:
+        orig_price = parsed.get("max_price")
+        orig_size = parsed.get("size")
+        if "price" in dropped and "size" in dropped:
+            session["relaxed"] = "couldn't find an exact match, so here are some options outside your price and size if you're interested:"
+        elif "price" in dropped:
+            session["relaxed"] = f"couldn't find anything under ${orig_price:g}, but here are some outside that range if you're interested:"
+        elif "size" in dropped:
+            session["relaxed"] = f"couldn't find anything in size {orig_size}, but here are some others if you're interested:"
+
+    # Step 4: pick the top result and run supporting tools
     session["selected_item"] = session["search_results"][0]
+    session["price_check"] = estimate_price_fairness(session["selected_item"])
+    session["trending_styles"] = get_trending_styles(size=parsed.get("size"))
 
     # Step 5: suggest an outfit
     session["outfit_suggestion"] = suggest_outfit(
